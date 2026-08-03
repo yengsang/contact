@@ -43,7 +43,15 @@ const getOrCreateTraceId = (ctx) => {
   const headerTraceId = String(ctx.request.headers['x-trace-id'] || '').trim();
   const traceId = headerTraceId || `backend-${Date.now()}-${(crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(8).toString('hex')).slice(0, 8)}`;
   ctx.state.requestTraceId = traceId;
-  ctx.set('x-trace-id', traceId);
+  if (typeof ctx.set === 'function') {
+    ctx.set('x-trace-id', traceId);
+  } else if (ctx.response && typeof ctx.response.set === 'function') {
+    ctx.response.set('x-trace-id', traceId);
+  } else {
+    ctx.response = ctx.response || {};
+    ctx.response.headers = ctx.response.headers || {};
+    ctx.response.headers['x-trace-id'] = traceId;
+  }
   return traceId;
 };
 
