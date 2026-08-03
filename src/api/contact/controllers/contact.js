@@ -61,6 +61,9 @@ const withTenantFilters = (tenantId, extraFilters = null) => {
   };
 };
 
+const getRequestTraceId = (ctx) =>
+  String(ctx.state?.requestTraceId || ctx.request?.headers?.['x-trace-id'] || 'no-trace').trim() || 'no-trace';
+
 module.exports = createCoreController(CONTACT_UID, ({ strapi }) => ({
   async find(ctx) {
     const tenant = ctx.state.appTenant;
@@ -126,6 +129,7 @@ module.exports = createCoreController(CONTACT_UID, ({ strapi }) => ({
 
   async create(ctx) {
     const tenant = ctx.state.appTenant;
+    const traceId = getRequestTraceId(ctx);
     const data = ctx.request.body?.data;
     if (!data || typeof data !== 'object') {
       return ctx.badRequest('A data object is required.');
@@ -142,7 +146,7 @@ module.exports = createCoreController(CONTACT_UID, ({ strapi }) => ({
     }
 
     strapi.log.info(
-      `[submission] stage=contact_create_started userId=${userId} tenantId=${tenant.id}` +
+      `[trace=${traceId}] [submission] stage=contact_create_started userId=${userId} tenantId=${tenant.id}` +
         ` phone=${String(data?.phone || '').trim() || '-'} name=${String(data?.name || '').trim() || '-'}`
     );
 
@@ -164,7 +168,7 @@ module.exports = createCoreController(CONTACT_UID, ({ strapi }) => ({
 
     const sanitized = await this.sanitizeOutput(created, ctx);
     strapi.log.info(
-      `[submission] stage=contact_create_completed userId=${userId} tenantId=${tenant.id}` +
+      `[trace=${traceId}] [submission] stage=contact_create_completed userId=${userId} tenantId=${tenant.id}` +
         ` contactId=${created?.id || 'null'} phone=${String(created?.phone || '').trim() || '-'}`
     );
     return this.transformResponse(sanitized);
@@ -172,6 +176,7 @@ module.exports = createCoreController(CONTACT_UID, ({ strapi }) => ({
 
   async update(ctx) {
     const tenant = ctx.state.appTenant;
+    const traceId = getRequestTraceId(ctx);
     const contactId = Number(ctx.params.id);
     if (Number.isNaN(contactId)) {
       return ctx.badRequest('Contact id must be a valid number.');
@@ -208,7 +213,7 @@ module.exports = createCoreController(CONTACT_UID, ({ strapi }) => ({
 
     const resolvedUserId = normalizeRelationId(payload.user) || existingContact?.user?.id || null;
     strapi.log.info(
-      `[submission] stage=contact_update_started userId=${resolvedUserId || 'null'} tenantId=${tenant.id}` +
+      `[trace=${traceId}] [submission] stage=contact_update_started userId=${resolvedUserId || 'null'} tenantId=${tenant.id}` +
         ` contactId=${contactId} phone=${String(payload?.phone || existingContact?.phone || '').trim() || '-'}`
     );
 
@@ -224,7 +229,7 @@ module.exports = createCoreController(CONTACT_UID, ({ strapi }) => ({
 
     const sanitized = await this.sanitizeOutput(updated, ctx);
     strapi.log.info(
-      `[submission] stage=contact_update_completed userId=${updated?.user?.id || resolvedUserId || 'null'} tenantId=${tenant.id}` +
+      `[trace=${traceId}] [submission] stage=contact_update_completed userId=${updated?.user?.id || resolvedUserId || 'null'} tenantId=${tenant.id}` +
         ` contactId=${updated?.id || contactId} phone=${String(updated?.phone || '').trim() || '-'}`
     );
     return this.transformResponse(sanitized);

@@ -348,6 +348,7 @@ const rejectDuplicateCompositeIdentity = async (ctx, strapi, tenantId, data, exc
 };
 
 const logSubmissionStage = (strapi, {
+  traceId = 'no-trace',
   userId = null,
   tenantId = null,
   stage = 'unknown',
@@ -356,7 +357,7 @@ const logSubmissionStage = (strapi, {
   extra = '',
 } = {}) => {
   strapi.log.info(
-    `[submission] stage=${stage}` +
+    `[trace=${traceId}] [submission] stage=${stage}` +
       ` userId=${userId ?? 'null'}` +
       ` tenantId=${tenantId ?? 'null'}` +
       ` phone=${phone || '-'}` +
@@ -364,6 +365,9 @@ const logSubmissionStage = (strapi, {
       (extra ? ` ${extra}` : '')
   );
 };
+
+const getRequestTraceId = (ctx) =>
+  String(ctx.state?.requestTraceId || ctx.request?.headers?.['x-trace-id'] || 'no-trace').trim() || 'no-trace';
 
 module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => ({
   async find(ctx) {
@@ -462,6 +466,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
 
   async update(ctx) {
     const tenant = ctx.state.appTenant;
+    const traceId = getRequestTraceId(ctx);
     const userId = Number(ctx.params.id);
     if (Number.isNaN(userId)) {
       return ctx.badRequest('User id must be a valid number.');
@@ -478,6 +483,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
     }
 
     logSubmissionStage(strapi, {
+      traceId,
       userId,
       tenantId: tenant.id,
       stage: 'profile_update_started',
@@ -511,6 +517,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
     const sanitizedUser = await this.sanitizeOutput(user, ctx);
 
     logSubmissionStage(strapi, {
+      traceId,
       userId,
       tenantId: tenant.id,
       stage: 'profile_update_completed',
@@ -688,6 +695,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
 
   async registerVerifiedUser(ctx) {
     const tenant = ctx.state.appTenant;
+    const traceId = getRequestTraceId(ctx);
     const tenantAdmin = ctx.state.appTenantAdmin || null;
     const launchQrToken = String(ctx.state.appLaunchToken || tenantAdmin?.qr_token || '').trim() || null;
     const phone = normalizePhone(ctx.request.body?.phone);
@@ -705,6 +713,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
     }
 
     logSubmissionStage(strapi, {
+      traceId,
       tenantId: tenant.id,
       stage: 'register_user_started',
       phone,
@@ -765,6 +774,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
     const sanitizedUser = await this.sanitizeOutput(user, ctx);
 
     logSubmissionStage(strapi, {
+      traceId,
       userId: user?.id || null,
       tenantId: tenant.id,
       stage: existingUser ? 'register_user_reused' : 'register_user_created',
@@ -788,6 +798,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
 
   async contacts(ctx) {
     const tenant = ctx.state.appTenant;
+    const traceId = getRequestTraceId(ctx);
     const userId = Number(ctx.params.id);
     const page = Math.max(1, Number(ctx.query.page) || 1);
     const pageSize = Math.max(1, Math.min(100, Number(ctx.query.pageSize) || 25));
@@ -805,7 +816,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
     }
 
     strapi.log.info(
-      `[submission] stage=contacts_lookup userId=${userId} tenantId=${tenant.id} phone=${phone || '-'} page=${page} pageSize=${pageSize}`
+      `[trace=${traceId}] [submission] stage=contacts_lookup userId=${userId} tenantId=${tenant.id} phone=${phone || '-'} page=${page} pageSize=${pageSize}`
     );
 
     const where = {
@@ -844,7 +855,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
     const sanitizedContacts = await this.sanitizeOutput(contacts, ctx);
 
     strapi.log.info(
-      `[submission] stage=contacts_lookup_completed userId=${userId} tenantId=${tenant.id} phone=${phone || '-'} results=${contacts.length} total=${total}`
+      `[trace=${traceId}] [submission] stage=contacts_lookup_completed userId=${userId} tenantId=${tenant.id} phone=${phone || '-'} results=${contacts.length} total=${total}`
     );
 
     return this.transformResponse(sanitizedContacts, {
@@ -859,6 +870,7 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
 
   async uploadProfileImage(ctx) {
     const tenant = ctx.state.appTenant;
+    const traceId = getRequestTraceId(ctx);
     const userId = Number(ctx.params.id);
     if (Number.isNaN(userId)) {
       return ctx.badRequest('User id must be a valid number.');
@@ -874,16 +886,25 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
       : ctx.request.files?.file;
 
     if (!uploadedFile) {
+      strapi.log.warn(
+        `[trace=${traceId}] [app-user][uploadProfileImage] missing file userId=${userId} tenantId=${tenant.id}`
+      );
       return ctx.badRequest('A file field named "file" is required.');
     }
 
     const mimeType = uploadedFile.type || uploadedFile.mimetype || '';
     if (!mimeType.startsWith('image/')) {
+      strapi.log.warn(
+        `[trace=${traceId}] [app-user][uploadProfileImage] invalid mime type userId=${userId} tenantId=${tenant.id} mimeType=${mimeType || 'unknown'}`
+      );
       return ctx.badRequest('Only image uploads are supported.');
     }
 
     const sourcePath = uploadedFile.filepath || uploadedFile.path;
     if (!sourcePath) {
+      strapi.log.warn(
+        `[trace=${traceId}] [app-user][uploadProfileImage] missing source path userId=${userId} tenantId=${tenant.id} originalName=${uploadedFile.originalFilename || uploadedFile.name || '-'}`
+      );
       return ctx.badRequest('Uploaded file path is missing.');
     }
 
@@ -901,9 +922,10 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
     const objectStorageClient = createObjectStorageClient();
 
     strapi.log.info(
-      `[app-user][uploadProfileImage] start userId=${userId} tenantId=${tenant.id} fileName=${storedFileName} mimeType=${mimeType || 'unknown'} objectKey=${objectKey}`
+      `[trace=${traceId}] [app-user][uploadProfileImage] start userId=${userId} tenantId=${tenant.id} fileName=${storedFileName} mimeType=${mimeType || 'unknown'} sizeBytes=${uploadedFile.size || uploadedFile.bytes || 'unknown'} objectKey=${objectKey}`
     );
     logSubmissionStage(strapi, {
+      traceId,
       userId,
       tenantId: tenant.id,
       stage: 'profile_image_upload_started',
@@ -913,60 +935,68 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
     });
 
     try {
-      const fileBuffer = await fs.readFile(sourcePath);
-      await objectStorageClient.putObject({
-        Bucket: bucket,
-        Key: objectKey,
-        Body: fileBuffer,
-        ContentType: mimeType || 'application/octet-stream',
-      }).promise();
-    } finally {
-      await fs.unlink(sourcePath).catch(() => {});
-    }
+      try {
+        const fileBuffer = await fs.readFile(sourcePath);
+        await objectStorageClient.putObject({
+          Bucket: bucket,
+          Key: objectKey,
+          Body: fileBuffer,
+          ContentType: mimeType || 'application/octet-stream',
+        }).promise();
+      } finally {
+        await fs.unlink(sourcePath).catch(() => {});
+      }
 
-    const imageUrl = buildObjectStoragePublicUrl(bucket, region, objectKey);
-    strapi.log.info(
-      `[app-user][uploadProfileImage] uploaded userId=${userId} tenantId=${tenant.id} objectKey=${objectKey} imageUrl=${imageUrl}`
-    );
-
-    const updatedUser = await strapi.entityService.update(APP_USER_UID, userId, {
-      data: {
-        image_url: imageUrl,
-        tenant: tenant.id,
-      },
-      fields: APP_USER_FIELDS,
-      populate: {
-        tenant: {
-          fields: ['id', 'name', 'slug'],
-        },
-      },
-    });
-
-    const persistedImageUrl = String(updatedUser?.image_url || '').trim();
-    if (!persistedImageUrl) {
-      strapi.log.error(
-        `[app-user][uploadProfileImage] missing persisted image_url after update userId=${userId} tenantId=${tenant.id} objectKey=${objectKey}`
+      const imageUrl = buildObjectStoragePublicUrl(bucket, region, objectKey);
+      strapi.log.info(
+        `[trace=${traceId}] [app-user][uploadProfileImage] uploaded userId=${userId} tenantId=${tenant.id} objectKey=${objectKey} imageUrl=${imageUrl}`
       );
-      return ctx.internalServerError('Image upload could not be confirmed on the server.');
+
+      const updatedUser = await strapi.entityService.update(APP_USER_UID, userId, {
+        data: {
+          image_url: imageUrl,
+          tenant: tenant.id,
+        },
+        fields: APP_USER_FIELDS,
+        populate: {
+          tenant: {
+            fields: ['id', 'name', 'slug'],
+          },
+        },
+      });
+
+      const persistedImageUrl = String(updatedUser?.image_url || '').trim();
+      if (!persistedImageUrl) {
+        strapi.log.error(
+          `[trace=${traceId}] [app-user][uploadProfileImage] missing persisted image_url after update userId=${userId} tenantId=${tenant.id} objectKey=${objectKey}`
+        );
+        return ctx.internalServerError('Image upload could not be confirmed on the server.');
+      }
+
+      strapi.log.info(
+        `[trace=${traceId}] [app-user][uploadProfileImage] saved userId=${userId} tenantId=${tenant.id} persistedImageUrl=${persistedImageUrl}`
+      );
+      logSubmissionStage(strapi, {
+        traceId,
+        userId,
+        tenantId: tenant.id,
+        stage: 'profile_image_upload_completed',
+        phone: String(updatedUser?.phone || user?.phone || '').trim(),
+        deviceId: String(updatedUser?.device_id || user?.device_id || '').trim(),
+        extra: `persistedImageUrl=${persistedImageUrl}`,
+      });
+
+      const sanitizedUser = await this.sanitizeOutput(updatedUser, ctx);
+
+      return this.transformResponse(sanitizedUser, {
+        imageUrl,
+        objectKey,
+      });
+    } catch (error) {
+      strapi.log.error(
+        `[trace=${traceId}] [app-user][uploadProfileImage] failed userId=${userId} tenantId=${tenant.id} objectKey=${objectKey} message=${error.message}`
+      );
+      throw error;
     }
-
-    strapi.log.info(
-      `[app-user][uploadProfileImage] saved userId=${userId} tenantId=${tenant.id} persistedImageUrl=${persistedImageUrl}`
-    );
-    logSubmissionStage(strapi, {
-      userId,
-      tenantId: tenant.id,
-      stage: 'profile_image_upload_completed',
-      phone: String(updatedUser?.phone || user?.phone || '').trim(),
-      deviceId: String(updatedUser?.device_id || user?.device_id || '').trim(),
-      extra: `persistedImageUrl=${persistedImageUrl}`,
-    });
-
-    const sanitizedUser = await this.sanitizeOutput(updatedUser, ctx);
-
-    return this.transformResponse(sanitizedUser, {
-      imageUrl,
-      objectKey,
-    });
   },
 }));

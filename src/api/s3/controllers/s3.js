@@ -24,6 +24,9 @@ const parsePositiveInt = (value) => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
+const getRequestTraceId = (ctx) =>
+  String(ctx.state?.requestTraceId || ctx.request?.headers?.['x-trace-id'] || 'no-trace').trim() || 'no-trace';
+
 const resolveUserId = async ({ strapi, tenantId, userId, userEmail }) => {
   const parsedId = parsePositiveInt(userId);
   if (parsedId) {
@@ -62,6 +65,7 @@ const resolveUserId = async ({ strapi, tenantId, userId, userEmail }) => {
 module.exports = {
   async presign(ctx) {
     const tenant = ctx.state.appTenant;
+    const traceId = getRequestTraceId(ctx);
     const {
       fileName,
       contentType,
@@ -70,6 +74,7 @@ module.exports = {
     } = ctx.request.body || {};
 
     if (!fileName || !contentType) {
+      strapi.log.warn(`[trace=${traceId}] [s3.presign] missing fileName/contentType tenantId=${tenant?.id || 'null'}`);
       return ctx.badRequest('fileName and contentType are required.');
     }
 
@@ -90,6 +95,9 @@ module.exports = {
       userEmail,
     });
     if (!resolvedUserId) {
+      strapi.log.warn(
+        `[trace=${traceId}] [s3.presign] user resolution failed tenantId=${tenant.id} userId=${userId || 'null'} userEmail=${String(userEmail || '').trim() || '-'} fileName=${fileName}`
+      );
       return ctx.badRequest('A valid tenant userId (or userEmail that resolves to one tenant user) is required.');
     }
 
@@ -110,6 +118,9 @@ module.exports = {
     const uniquePart = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
     const keyPrefix = buildTenantUserImagePrefix(appUser.tenant, resolvedUserId, prefix);
     const objectKey = `${keyPrefix}/${Date.now()}-${uniquePart}-${safeFileName}`;
+    strapi.log.info(
+      `[trace=${traceId}] [s3.presign] start tenantId=${tenant.id} userId=${resolvedUserId} fileName=${safeFileName} contentType=${contentType} objectKey=${objectKey}`
+    );
 
     const s3Client = createObjectStorageClient();
 
@@ -136,5 +147,8 @@ module.exports = {
       consoleFolderUrl,
       expiresIn,
     };
+    strapi.log.info(
+      `[trace=${traceId}] [s3.presign] completed tenantId=${tenant.id} userId=${resolvedUserId} objectKey=${objectKey} expiresIn=${expiresIn}`
+    );
   },
 };

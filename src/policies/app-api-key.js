@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const { findTenantByApiKey, findTenantLaunchByQrToken, findTenantLaunchByReferralCode } = require('../utils/tenant-access');
 
 const getClientIp = (ctx) => {
@@ -38,7 +39,16 @@ const rejectForbidden = (ctx, message) => {
   return false;
 };
 
+const getOrCreateTraceId = (ctx) => {
+  const headerTraceId = String(ctx.request.headers['x-trace-id'] || '').trim();
+  const traceId = headerTraceId || `backend-${Date.now()}-${(crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(8).toString('hex')).slice(0, 8)}`;
+  ctx.state.requestTraceId = traceId;
+  ctx.set('x-trace-id', traceId);
+  return traceId;
+};
+
 module.exports = async (policyContext, _config, { strapi }) => {
+  const traceId = getOrCreateTraceId(policyContext);
   const headerKey = (
     policyContext.request.headers['x-app-api-key']
     || policyContext.request.headers['x-app-write-key']
@@ -71,7 +81,7 @@ module.exports = async (policyContext, _config, { strapi }) => {
 
   if (!presentedKey && !referralCode) {
     strapi.log.warn(
-      `[app-api-key] Missing tenant API key for ${policyContext.request.method} ${policyContext.request.path} ` +
+      `[trace=${traceId}] [app-api-key] Missing tenant API key for ${policyContext.request.method} ${policyContext.request.path} ` +
       `from ${getClientIp(policyContext)} user-agent="${policyContext.request.headers['user-agent'] || 'unknown'}"`
     );
     return rejectForbidden(policyContext, 'Invalid tenant launch token or application API key.');
@@ -89,8 +99,12 @@ module.exports = async (policyContext, _config, { strapi }) => {
     || referralLaunchContext?.tenant;
   if (tenant) {
     strapi.log.info(
-      `[app-api-key] Accepted ${policyContext.request.method} ${policyContext.request.path} ` +
+      `[trace=${traceId}] [app-api-key] Accepted ${policyContext.request.method} ${policyContext.request.path} ` +
       `tenant=${tenant.slug || tenant.id} key=${maskKey(presentedKey || referralCode)} ` +
+      `qrTokenPresent=${Boolean(qrTokenHeader)} referralCodePresent=${Boolean(referralCode)} ` +
+      `deviceId=${String(policyContext.request.headers['x-device-id'] || '').trim() || '-'} ` +
+      `appVersion=${String(policyContext.request.headers['x-app-version'] || '').trim() || '-'} ` +
+      `platform=${String(policyContext.request.headers['x-client-platform'] || '').trim() || '-'} ` +
       `from ${getClientIp(policyContext)} user-agent="${policyContext.request.headers['user-agent'] || 'unknown'}"`
     );
     policyContext.state.appTenant = tenant;
@@ -103,8 +117,12 @@ module.exports = async (policyContext, _config, { strapi }) => {
   }
 
   strapi.log.warn(
-    `[app-api-key] Blocked ${policyContext.request.method} ${policyContext.request.path} ` +
+    `[trace=${traceId}] [app-api-key] Blocked ${policyContext.request.method} ${policyContext.request.path} ` +
     `key=${maskKey(presentedKey)} ` +
+    `qrTokenPresent=${Boolean(qrTokenHeader)} referralCodePresent=${Boolean(referralCode)} ` +
+    `deviceId=${String(policyContext.request.headers['x-device-id'] || '').trim() || '-'} ` +
+    `appVersion=${String(policyContext.request.headers['x-app-version'] || '').trim() || '-'} ` +
+    `platform=${String(policyContext.request.headers['x-client-platform'] || '').trim() || '-'} ` +
     `from ${getClientIp(policyContext)} user-agent="${policyContext.request.headers['user-agent'] || 'unknown'}"`
   );
 
