@@ -79,6 +79,16 @@ const customRouter = {
         middlewares: [],
       },
     },
+    {
+      method: 'POST',
+      path: '/client-events',
+      handler: 'app-user.clientEvent',
+      config: {
+        auth: false,
+        policies: ['global::app-api-key'],
+        middlewares: [],
+      },
+    },
   ],
 };
 

@@ -369,6 +369,25 @@ const logSubmissionStage = (strapi, {
 const getRequestTraceId = (ctx) =>
   String(ctx.state?.requestTraceId || ctx.request?.headers?.['x-trace-id'] || 'no-trace').trim() || 'no-trace';
 
+const sanitizeDiagnosticValue = (value, fallback = '-') => {
+  const normalized = String(value == null ? '' : value)
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized || fallback;
+};
+
+const serializeDiagnosticContext = (value) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return '';
+  }
+
+  const entries = Object.entries(value)
+    .slice(0, 20)
+    .map(([key, entryValue]) => `${sanitizeDiagnosticValue(key, 'key')}=${sanitizeDiagnosticValue(entryValue)}`);
+
+  return entries.join(' ');
+};
+
 module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => ({
   async find(ctx) {
     const tenant = ctx.state.appTenant;
@@ -998,5 +1017,52 @@ module.exports = createCoreController('api::app-user.app-user', ({ strapi }) => 
       );
       throw error;
     }
+  },
+
+  async clientEvent(ctx) {
+    const tenant = ctx.state.appTenant;
+    const traceId = getRequestTraceId(ctx);
+    const body = ctx.request.body || {};
+    const flow = sanitizeDiagnosticValue(body.flow, 'unknown');
+    const step = sanitizeDiagnosticValue(body.step, 'unknown');
+    const status = sanitizeDiagnosticValue(body.status, 'info').toLowerCase();
+    const message = sanitizeDiagnosticValue(body.message, '');
+    const userId = Number.isInteger(Number(body.userId)) ? Number(body.userId) : null;
+    const phone = sanitizeDiagnosticValue(body.phone, '-');
+    const deviceId = sanitizeDiagnosticValue(body.deviceId || ctx.request.headers['x-device-id'], '-');
+    const appVersion = sanitizeDiagnosticValue(body.appVersion || ctx.request.headers['x-app-version'], '-');
+    const platform = sanitizeDiagnosticValue(body.platform || ctx.request.headers['x-client-platform'], '-');
+    const tenantCode = sanitizeDiagnosticValue(body.tenantCode || tenant?.slug, '-');
+    const screen = sanitizeDiagnosticValue(body.screen, '-');
+    const contextSuffix = serializeDiagnosticContext(body.context);
+
+    const logLine =
+      `[trace=${traceId}] [client-event]` +
+      ` flow=${flow}` +
+      ` step=${step}` +
+      ` status=${status}` +
+      ` tenantId=${tenant?.id ?? 'null'}` +
+      ` tenantCode=${tenantCode}` +
+      ` userId=${userId ?? 'null'}` +
+      ` phone=${phone}` +
+      ` deviceId=${deviceId}` +
+      ` appVersion=${appVersion}` +
+      ` platform=${platform}` +
+      ` screen=${screen}` +
+      (message ? ` message="${message}"` : '') +
+      (contextSuffix ? ` ${contextSuffix}` : '');
+
+    if (status === 'error' || status === 'failed' || status === 'failure') {
+      strapi.log.warn(logLine);
+    } else {
+      strapi.log.info(logLine);
+    }
+
+    ctx.body = {
+      data: {
+        accepted: true,
+        traceId,
+      },
+    };
   },
 }));
