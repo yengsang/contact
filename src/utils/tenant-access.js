@@ -246,13 +246,23 @@ const resolveAdminUser = async (strapi, adminUser) => {
     return null;
   }
 
-  return strapi.query(ADMIN_USER_UID).findOne({
+  // ctx.state.user may omit roles. Load the authoritative admin record so
+  // capability checks work consistently for Super Admin and Admin Leader.
+  return strapi.db.query(ADMIN_USER_UID).findOne({
     where: {
       id: adminUser.id,
     },
-    populate: ['roles'],
+    populate: {
+      roles: true,
+    },
   });
 };
+
+const getAdminRoleCodes = (adminUser) => (Array.isArray(adminUser?.roles)
+  ? adminUser.roles
+    .map((role) => String(role?.code || role?.name || role?.displayName || '').trim())
+    .filter(Boolean)
+  : []);
 
 const buildAdminLeaderOwnershipFilter = ({ adminUserId, adminEmail }) => {
   const filters = [];
@@ -289,9 +299,11 @@ const getAdminTenantContext = async (strapi, adminUser) => {
       tenantAdminNames: [],
       adminEmail: null,
       tenants: [],
+      roleCodes: [],
     };
   }
 
+  const roleCodes = getAdminRoleCodes(resolvedAdminUser);
   const roleServiceHasSuperAdminRole = strapi.admin?.services?.role?.hasSuperAdminRole;
   const isSuperAdminFromService = typeof roleServiceHasSuperAdminRole === 'function'
     ? roleServiceHasSuperAdminRole(resolvedAdminUser)
@@ -312,6 +324,7 @@ const getAdminTenantContext = async (strapi, adminUser) => {
       tenantAdminNames: [],
       adminEmail: String(resolvedAdminUser.email || '').trim().toLowerCase() || null,
       tenants: [],
+      roleCodes,
     };
   }
 
@@ -362,6 +375,7 @@ const getAdminTenantContext = async (strapi, adminUser) => {
       tenantAdminNames: [...new Set(tenantAdmins.map((entry) => String(entry.tenant_name || '').trim()).filter(Boolean))],
       adminEmail: String(resolvedAdminUser.email || '').trim().toLowerCase() || null,
       tenants,
+      roleCodes,
     };
   }
 
@@ -410,6 +424,7 @@ const getAdminTenantContext = async (strapi, adminUser) => {
     tenantAdminNames,
     adminEmail: String(resolvedAdminUser.email || '').trim().toLowerCase() || null,
     tenants,
+    roleCodes,
   };
 };
 

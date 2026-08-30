@@ -2841,6 +2841,7 @@ module.exports = {
               strapi.log.info(
                 `[tenant-admin][capabilities] adminUser=${adminUser.id} isSuperAdmin=${tenantContext.isSuperAdmin}` +
                 ` isAdminLeader=${tenantContext.isAdminLeader} isTenantAdmin=${tenantContext.isTenantAdmin}` +
+                ` roles=${JSON.stringify(tenantContext.roleCodes || [])}` +
                 ` tenantIds=${JSON.stringify(tenantContext.tenantIds)}` +
                 ` tenantAdminRecordId=${tenantAdminRecordId || 'null'}`
               );
