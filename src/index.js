@@ -2849,6 +2849,7 @@ module.exports = {
               const sharedApp = await findSharedAppConfig(strapi);
               ctx.body = {
                 data: {
+                  isSuperAdmin: tenantContext.isSuperAdmin === true,
                   isTenantAdminScoped: tenantContext.isTenantAdmin === true,
                   isAdminLeader: tenantContext.isAdminLeader === true,
                   canViewUserImages: tenantContext.isSuperAdmin || tenantContext.isAdminLeader === true,

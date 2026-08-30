@@ -241,7 +241,7 @@ const AppUserPanel = () => {
         setIsCapabilitiesLoading(true);
         const capabilities = await fetchTenantAdminCapabilities();
         if (!isMounted) return;
-        setCanViewUserImages(capabilities?.canViewUserImages === true);
+        setCanViewUserImages(canCurrentAdminViewUserImages(capabilities));
       } catch (_error) {
         if (!isMounted) return;
         setCanViewUserImages(false);
@@ -1366,7 +1366,7 @@ const AppUserSelfiePreview = () => {
         setIsCapabilitiesLoading(true);
         const capabilities = await fetchTenantAdminCapabilities();
         if (!isMounted) return;
-        setCanViewUserImages(capabilities?.canViewUserImages === true);
+        setCanViewUserImages(canCurrentAdminViewUserImages(capabilities));
       } catch (_error) {
         if (!isMounted) return;
         setCanViewUserImages(false);
@@ -2487,8 +2487,14 @@ const fetchTenantAdminCapabilities = async () => {
   }
 
   const payload = await response.json();
-  return payload?.data || {};
+  return payload?.data?.data || payload?.data || {};
 };
+
+const canCurrentAdminViewUserImages = (capabilities) => (
+  capabilities?.canViewUserImages === true ||
+  capabilities?.isSuperAdmin === true ||
+  capabilities?.isAdminLeader === true
+);
 
 const extractPasswordChangePayload = (body) => {
   if (!body) return null;
