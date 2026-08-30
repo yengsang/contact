@@ -12,6 +12,16 @@ const parsePositiveInt = (value) => {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 };
 
+const isAdminLeaderRole = (role) => {
+  const normalizeRoleIdentifier = (value) => String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+
+  return [role?.code, role?.name, role?.displayName]
+    .some((value) => normalizeRoleIdentifier(value) === 'adminleader');
+};
+
 const findTenantByApiKey = async (strapi, apiKey) => {
   const key = String(apiKey || '').trim();
   if (!key) {
@@ -294,9 +304,7 @@ const getAdminTenantContext = async (strapi, adminUser) => {
     };
   }
 
-  const hasAdminLeaderRole = Array.isArray(resolvedAdminUser.roles) && resolvedAdminUser.roles.some(
-    (role) => String(role?.code || '').toLowerCase() === 'admin-leader'
-  );
+  const hasAdminLeaderRole = Array.isArray(resolvedAdminUser.roles) && resolvedAdminUser.roles.some(isAdminLeaderRole);
 
   if (hasAdminLeaderRole) {
     const ownershipFilter = buildAdminLeaderOwnershipFilter({
@@ -541,6 +549,7 @@ module.exports = {
   getStorageTenantSegment,
   getTenantFilter,
   getTenantIdsFilter,
+  isAdminLeaderRole,
   getUserTenantId,
   parsePositiveInt,
 };

@@ -1,10 +1,13 @@
 'use strict';
 
 const { errors } = require('@strapi/utils');
-const { ADMIN_USER_UID, parsePositiveInt } = require('../../../../utils/tenant-access');
+const {
+  ADMIN_USER_UID,
+  isAdminLeaderRole,
+  parsePositiveInt,
+} = require('../../../../utils/tenant-access');
 
 const { ValidationError } = errors;
-const ADMIN_LEADER_ROLE_CODE = 'admin-leader';
 
 const normalizeEmail = (value) => String(value || '').trim().toLowerCase();
 
@@ -58,9 +61,7 @@ const syncAdminLeaderAccount = async (event) => {
     throw new ValidationError('Create the Strapi Admin Leader account first, then enter its email here.');
   }
 
-  const hasAdminLeaderRole = Array.isArray(adminUser.roles) && adminUser.roles.some(
-    (role) => String(role?.code || '').toLowerCase() === ADMIN_LEADER_ROLE_CODE
-  );
+  const hasAdminLeaderRole = Array.isArray(adminUser.roles) && adminUser.roles.some(isAdminLeaderRole);
   if (!hasAdminLeaderRole) {
     throw new ValidationError('The selected Strapi admin user must have the Admin Leader role.');
   }
