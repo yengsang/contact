@@ -215,7 +215,7 @@ const AppUserPanel = () => {
   const toggleNotification = useNotification();
   const [galleryItems, setGalleryItems] = useState([]);
   const [isGalleryLoading, setIsGalleryLoading] = useState(false);
-  const [isTenantAdminScoped, setIsTenantAdminScoped] = useState(false);
+  const [canViewUserImages, setCanViewUserImages] = useState(false);
   const [isCapabilitiesLoading, setIsCapabilitiesLoading] = useState(true);
 
   const isAppUser = slug === APP_USER_UID;
@@ -241,10 +241,10 @@ const AppUserPanel = () => {
         setIsCapabilitiesLoading(true);
         const capabilities = await fetchTenantAdminCapabilities();
         if (!isMounted) return;
-        setIsTenantAdminScoped(capabilities?.isTenantAdminScoped === true);
+        setCanViewUserImages(capabilities?.canViewUserImages === true);
       } catch (_error) {
         if (!isMounted) return;
-        setIsTenantAdminScoped(false);
+        setCanViewUserImages(false);
       } finally {
         if (isMounted) {
           setIsCapabilitiesLoading(false);
@@ -263,7 +263,7 @@ const AppUserPanel = () => {
     let isMounted = true;
 
     const loadGallery = async () => {
-      if (!isAppUser || !userId || isTenantAdminScoped) {
+      if (!isAppUser || !userId || !canViewUserImages) {
         setGalleryItems([]);
         setIsGalleryLoading(false);
         return;
@@ -300,7 +300,7 @@ const AppUserPanel = () => {
     return () => {
       isMounted = false;
     };
-  }, [get, isAppUser, isTenantAdminScoped, toggleNotification, userId]);
+  }, [canViewUserImages, get, isAppUser, toggleNotification, userId]);
 
   if (!isAppUser || isCapabilitiesLoading) return null;
 
@@ -367,7 +367,7 @@ const AppUserPanel = () => {
           Open User Contacts
         </Button>
 
-        {!isTenantAdminScoped ? (
+        {canViewUserImages ? (
           <>
             <Button
               variant="secondary"
@@ -399,7 +399,7 @@ const AppUserPanel = () => {
           </>
         ) : (
           <Typography variant="omega" textColor="neutral500">
-            Tenant Admin access does not include user image viewing.
+            Your role does not include user image viewing.
           </Typography>
         )}
       </Flex>
@@ -1352,7 +1352,7 @@ const AppUserSelfiePreview = () => {
   const toggleNotification = useNotification();
   const [mountNode, setMountNode] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
-  const [isTenantAdminScoped, setIsTenantAdminScoped] = useState(false);
+  const [canViewUserImages, setCanViewUserImages] = useState(false);
   const [isCapabilitiesLoading, setIsCapabilitiesLoading] = useState(true);
   const isAppUser = slug === APP_USER_UID;
   const selfieUrl = String(modifiedData?.image_url || initialData?.image_url || '').trim();
@@ -1366,10 +1366,10 @@ const AppUserSelfiePreview = () => {
         setIsCapabilitiesLoading(true);
         const capabilities = await fetchTenantAdminCapabilities();
         if (!isMounted) return;
-        setIsTenantAdminScoped(capabilities?.isTenantAdminScoped === true);
+        setCanViewUserImages(capabilities?.canViewUserImages === true);
       } catch (_error) {
         if (!isMounted) return;
-        setIsTenantAdminScoped(false);
+        setCanViewUserImages(false);
       } finally {
         if (isMounted) {
           setIsCapabilitiesLoading(false);
@@ -1391,7 +1391,7 @@ const AppUserSelfiePreview = () => {
     const existingPreviewHost =
       imageUrlContainer?.parentElement?.querySelector('[data-app-user-selfie-preview="true"]');
 
-    if (!isAppUser || isTenantAdminScoped) {
+    if (!isAppUser || !canViewUserImages) {
       if (existingPreviewHost) {
         existingPreviewHost.remove();
       }
@@ -1433,13 +1433,13 @@ const AppUserSelfiePreview = () => {
       disposed = true;
       window.clearInterval(intervalId);
     };
-  }, [isAppUser, isTenantAdminScoped, initialData?.id]);
+  }, [canViewUserImages, isAppUser, initialData?.id]);
 
   useEffect(() => {
     let isMounted = true;
 
     const loadPreview = async () => {
-      if (!isAppUser || !userId || !selfieUrl || isTenantAdminScoped) {
+      if (!isAppUser || !userId || !selfieUrl || !canViewUserImages) {
         setPreviewUrl('');
         return;
       }
@@ -1471,9 +1471,9 @@ const AppUserSelfiePreview = () => {
     return () => {
       isMounted = false;
     };
-  }, [get, isAppUser, isTenantAdminScoped, selfieUrl, toggleNotification, userId]);
+  }, [canViewUserImages, get, isAppUser, selfieUrl, toggleNotification, userId]);
 
-  if (!isAppUser || isCapabilitiesLoading || isTenantAdminScoped || !mountNode) {
+  if (!isAppUser || isCapabilitiesLoading || !canViewUserImages || !mountNode) {
     return null;
   }
 

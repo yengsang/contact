@@ -455,9 +455,7 @@ const assertScopedAdminRecord = async (strapi, tenantContext, model, entityId) =
   if (model === APP_TENANT_ADMIN_UID) {
     return findScopedTenantAdminRecord({
       strapi,
-      adminUserId: tenantContext.adminUserId,
-      adminEmail: Array.isArray(tenantContext?.tenantAdminEmails) ? tenantContext.tenantAdminEmails[0] : null,
-      tenantIds: tenantContext.tenantIds,
+      tenantContext,
       entityId: parsedEntityId,
     });
   }
@@ -587,9 +585,7 @@ const attachTenantScopedContentManagerControllers = (strapi) => {
       );
       const response = await buildScopedTenantAdminListResponse({
         strapi,
-        adminUserId: adminUser.id,
-        adminEmail: adminUser.email,
-        tenantIds: tenantContext.tenantIds,
+        tenantContext,
         requestQuery: ctx.request.query || {},
       });
 
@@ -719,6 +715,15 @@ const attachTenantScopedContentManagerControllers = (strapi) => {
     }
 
     if (model === APP_TENANT_ADMIN_UID) {
+      const scopedEntity = await findScopedTenantAdminRecord({
+        strapi,
+        tenantContext,
+        entityId,
+      });
+      if (!scopedEntity) {
+        return ctx.forbidden('This Tenant Admin record is outside your scope.');
+      }
+
       const entity = await strapi.entityService.findOne(APP_TENANT_ADMIN_UID, entityId, {
         fields: Object.keys(strapi.getModel(APP_TENANT_ADMIN_UID)?.attributes || {}),
         populate: {
@@ -961,7 +966,11 @@ const attachTenantAdminPermissionExpansion = (strapi) => {
       'plugin::upload.folder',
     ]);
     const hiddenActionPrefixes = ['plugin::upload.'];
-    const readOnlySubjects = new Set([APP_USER_UID, CONTACT_UID, APP_TENANT_ADMIN_UID]);
+    const readOnlySubjects = new Set([
+      APP_USER_UID,
+      CONTACT_UID,
+      ...(tenantContext.isAdminLeader ? [] : [APP_TENANT_ADMIN_UID]),
+    ]);
     const visiblePermissions = userPermissions.filter(
       (permission) =>
         !hiddenSubjects.has(permission.subject) &&
@@ -1440,9 +1449,19 @@ const backfillContactTenantAdminNames = async (strapi) => {
   }
 };
 
-const buildScopedTenantAdminListResponse = async ({ strapi, adminUserId, adminEmail, tenantIds, requestQuery }) => {
-  const ownershipFilter = buildTenantAdminOwnershipFilter({ adminUserId, adminEmail });
-  if (!ownershipFilter) {
+const getTenantAdminScopeFilter = (tenantContext) => {
+  const tenantAdminIds = Array.isArray(tenantContext?.tenantAdminIds)
+    ? tenantContext.tenantAdminIds.map((entry) => parsePositiveInt(entry)).filter(Boolean)
+    : [];
+
+  return tenantAdminIds.length
+    ? { id: { $in: tenantAdminIds } }
+    : null;
+};
+
+const buildScopedTenantAdminListResponse = async ({ strapi, tenantContext, requestQuery }) => {
+  const scopeFilter = getTenantAdminScopeFilter(tenantContext);
+  if (!scopeFilter) {
     const emptyPageSize = Math.max(1, Math.min(100, Number(requestQuery?.pageSize) || 10));
     return {
       results: [],
@@ -1460,14 +1479,12 @@ const buildScopedTenantAdminListResponse = async ({ strapi, adminUserId, adminEm
       ? {
           $and: [
             requestQuery.filters,
-            ownershipFilter,
-            { tenant: { id: { $in: tenantIds } } },
+            scopeFilter,
           ],
         }
       : {
           $and: [
-            ownershipFilter,
-            { tenant: { id: { $in: tenantIds } } },
+            scopeFilter,
           ],
         };
 
@@ -1506,9 +1523,9 @@ const buildScopedTenantAdminListResponse = async ({ strapi, adminUserId, adminEm
   };
 };
 
-const findScopedTenantAdminRecord = async ({ strapi, adminUserId, adminEmail, tenantIds, entityId }) => {
-  const ownershipFilter = buildTenantAdminOwnershipFilter({ adminUserId, adminEmail });
-  if (!ownershipFilter) {
+const findScopedTenantAdminRecord = async ({ strapi, tenantContext, entityId }) => {
+  const scopeFilter = getTenantAdminScopeFilter(tenantContext);
+  if (!scopeFilter) {
     return null;
   }
 
@@ -1520,14 +1537,7 @@ const findScopedTenantAdminRecord = async ({ strapi, adminUserId, adminEmail, te
             $eq: entityId,
           },
         },
-        ownershipFilter,
-        {
-          tenant: {
-            id: {
-              $in: tenantIds,
-            },
-          },
-        },
+        scopeFilter,
       ],
     },
     populate: {
@@ -1939,6 +1949,10 @@ const buildContactExportFilename = ({ isTenantAdminScoped }) => {
 const streamContactsCsvExport = async ({ ctx, strapi, adminUser, tenantContext }) => {
   const sharedApp = await findSharedAppConfig(strapi);
   const isTenantAdminScoped = !tenantContext.isSuperAdmin && tenantContext.tenantIds.length > 0;
+
+  if (tenantContext.isAdminLeader) {
+    return ctx.forbidden('Admin Leader users cannot export contacts.');
+  }
 
   if (isTenantAdminScoped && sharedApp?.enable_tenant_admin_contact_export === false) {
     return ctx.forbidden('Contact export is disabled for Tenant Admin users.');
@@ -2473,9 +2487,7 @@ module.exports = {
           if (!entityId) {
             ctx.body = await buildScopedTenantAdminListResponse({
               strapi,
-              adminUserId: adminUser.id,
-              adminEmail: adminUser.email,
-              tenantIds: tenantContext.tenantIds,
+              tenantContext,
               requestQuery: ctx.request.query || {},
             });
             return;
@@ -2483,9 +2495,7 @@ module.exports = {
 
           const scopedRecord = await findScopedTenantAdminRecord({
             strapi,
-            adminUserId: adminUser.id,
-            adminEmail: adminUser.email,
-            tenantIds: tenantContext.tenantIds,
+            tenantContext,
             entityId,
           });
 
@@ -2510,7 +2520,27 @@ module.exports = {
           return;
         }
 
-        return ctx.forbidden('Tenant admin users cannot modify tenant admin mappings.');
+        if (ctx.method === 'PUT' && tenantContext.isAdminLeader) {
+          const entityId = getContentManagerEntityId(ctx.request.path || '');
+          const scopedRecord = await findScopedTenantAdminRecord({
+            strapi,
+            tenantContext,
+            entityId,
+          });
+          if (!scopedRecord) {
+            return ctx.forbidden('This Tenant Admin record is outside your scope.');
+          }
+
+          const data = getRequestData(ctx) || {};
+          const safeData = {};
+          if (Object.prototype.hasOwnProperty.call(data, 'tenant_name')) {
+            safeData.tenant_name = data.tenant_name;
+          }
+          setRequestData(ctx, safeData);
+          return next();
+        }
+
+        return ctx.forbidden('Tenant Admin users cannot modify Tenant Admin mappings.');
       }
 
       if (slug === APP_TENANT_UID) {
@@ -2781,9 +2811,12 @@ module.exports = {
               }
 
               const sharedApp = await findSharedAppConfig(strapi);
+              const tenantContext = await getAdminTenantContext(strapi, adminUser);
               ctx.body = {
                 data: {
-                  enabled: sharedApp?.enable_twilio_voice_panel !== false,
+                  enabled:
+                    !tenantContext.isAdminLeader &&
+                    sharedApp?.enable_twilio_voice_panel !== false,
                 },
               };
             },
@@ -2801,46 +2834,9 @@ module.exports = {
               }
 
               const tenantContext = await getAdminTenantContext(strapi, adminUser);
-              let tenantAdminRecordId = null;
-
-              if (!tenantContext.isSuperAdmin && tenantContext.tenantIds.length) {
-                const ownershipFilter = buildTenantAdminOwnershipFilter({
-                  adminUserId: adminUser.id,
-                  adminEmail: adminUser.email,
-                });
-                const candidateRecords = await strapi.entityService.findMany(APP_TENANT_ADMIN_UID, {
-                  filters: {
-                    $and: [
-                      ownershipFilter || {},
-                      {
-                        tenant: {
-                          id: {
-                            $in: tenantContext.tenantIds,
-                          },
-                        },
-                      },
-                    ],
-                  },
-                  fields: ['id'],
-                  sort: ['id:desc'],
-                  limit: 20,
-                });
-
-                for (const candidate of candidateRecords || []) {
-                  const scopedRecord = await findScopedTenantAdminRecord({
-                    strapi,
-                    adminUserId: adminUser.id,
-                    adminEmail: adminUser.email,
-                    tenantIds: tenantContext.tenantIds,
-                    entityId: candidate?.id,
-                  });
-
-                  if (scopedRecord?.id) {
-                    tenantAdminRecordId = scopedRecord.id;
-                    break;
-                  }
-                }
-              }
+              const tenantAdminRecordId = tenantContext.isTenantAdmin
+                ? tenantContext.tenantAdminIds?.[0] || null
+                : null;
 
               strapi.log.info(
                 `[tenant-admin][capabilities] adminUser=${adminUser.id} isSuperAdmin=${tenantContext.isSuperAdmin} tenantIds=${JSON.stringify(
@@ -2851,11 +2847,15 @@ module.exports = {
               const sharedApp = await findSharedAppConfig(strapi);
               ctx.body = {
                 data: {
-                  isTenantAdminScoped: !tenantContext.isSuperAdmin && tenantContext.tenantIds.length > 0,
+                  isTenantAdminScoped: tenantContext.isTenantAdmin === true,
+                  isAdminLeader: tenantContext.isAdminLeader === true,
+                  canViewUserImages: tenantContext.isSuperAdmin || tenantContext.isAdminLeader === true,
+                  canManageTenantAdmins: tenantContext.isSuperAdmin || tenantContext.isAdminLeader === true,
                   canDeleteManagedRecords: tenantContext.isSuperAdmin,
                   canExportContacts:
-                    tenantContext.isSuperAdmin ||
-                    sharedApp?.enable_tenant_admin_contact_export !== false,
+                    !tenantContext.isAdminLeader &&
+                    (tenantContext.isSuperAdmin ||
+                      sharedApp?.enable_tenant_admin_contact_export !== false),
                   tenantAdminRecordId,
                 },
               };
@@ -2892,6 +2892,11 @@ module.exports = {
             const adminUser = await getAdminRequestUser(ctx, strapi);
             if (!adminUser?.id) {
               return ctx.unauthorized('Admin authentication is required.');
+            }
+
+            const tenantContext = await getAdminTenantContext(strapi, adminUser);
+            if (tenantContext.isAdminLeader) {
+              return ctx.forbidden('Admin Leader users cannot use the voice panel.');
             }
 
             try {
@@ -3039,7 +3044,7 @@ module.exports = {
             const tenantContext = await getAdminTenantContext(strapi, await getAdminRequestUser(ctx, strapi));
             let user;
 
-            if (!tenantContext.isSuperAdmin) {
+            if (!tenantContext.isSuperAdmin && !tenantContext.isAdminLeader) {
               return ctx.forbidden('Tenant Admin users are not allowed to view user gallery images.');
             }
 
@@ -3058,6 +3063,12 @@ module.exports = {
 
             if (!user) {
               return ctx.forbidden('This user is outside your tenant.');
+            }
+
+            if (tenantContext.isAdminLeader) {
+              strapi.log.info(
+                `[admin-leader][image-view] adminUser=${ctx.state?.user?.id || 'unknown'} user=${userId} action=gallery-preview`
+              );
             }
 
             const s3Client = createObjectStorageClient();
@@ -3125,7 +3136,7 @@ module.exports = {
               const tenantContext = await getAdminTenantContext(strapi, await getAdminRequestUser(ctx, strapi));
               let user;
 
-              if (!tenantContext.isSuperAdmin) {
+              if (!tenantContext.isSuperAdmin && !tenantContext.isAdminLeader) {
                 return ctx.forbidden('Tenant Admin users are not allowed to view user selfie images.');
               }
 
@@ -3144,6 +3155,12 @@ module.exports = {
 
               if (!user) {
                 return ctx.forbidden('This user is outside your tenant.');
+              }
+
+              if (tenantContext.isAdminLeader) {
+                strapi.log.info(
+                  `[admin-leader][image-view] adminUser=${ctx.state?.user?.id || 'unknown'} user=${userId} action=selfie-preview`
+                );
               }
 
               const imageUrl = String(user.image_url || '').trim();

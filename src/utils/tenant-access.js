@@ -1,6 +1,7 @@
 'use strict';
 
 const APP_TENANT_UID = 'api::tenant.tenant';
+const APP_ADMIN_LEADER_UID = 'api::admin-leader.admin-leader';
 const APP_TENANT_ADMIN_UID = 'api::tenant-admin.tenant-admin';
 const APP_USER_UID = 'api::app-user.app-user';
 const CONTACT_UID = 'api::contact.contact';
@@ -234,12 +235,35 @@ const resolveAdminUser = async (strapi, adminUser) => {
   });
 };
 
+const buildAdminLeaderOwnershipFilter = ({ adminUserId, adminEmail }) => {
+  const filters = [];
+  const parsedAdminUserId = parsePositiveInt(adminUserId);
+  const normalizedAdminEmail = String(adminEmail || '').trim().toLowerCase();
+
+  if (parsedAdminUserId) {
+    filters.push({ admin_user_id: { $eq: parsedAdminUserId } });
+  }
+
+  if (normalizedAdminEmail) {
+    filters.push({ admin_email: { $eq: normalizedAdminEmail } });
+  }
+
+  if (!filters.length) {
+    return null;
+  }
+
+  return filters.length === 1 ? filters[0] : { $or: filters };
+};
+
 const getAdminTenantContext = async (strapi, adminUser) => {
   const resolvedAdminUser = await resolveAdminUser(strapi, adminUser);
   if (!resolvedAdminUser?.id) {
     return {
       isAdmin: false,
       isSuperAdmin: false,
+      isAdminLeader: false,
+      isTenantAdmin: false,
+      adminLeaderIds: [],
       tenantIds: [],
       tenantAdminIds: [],
       tenantAdminEmails: [],
@@ -258,12 +282,67 @@ const getAdminTenantContext = async (strapi, adminUser) => {
     return {
       isAdmin: true,
       isSuperAdmin: true,
+      isAdminLeader: false,
+      isTenantAdmin: false,
+      adminLeaderIds: [],
       tenantIds: [],
       tenantAdminIds: [],
       tenantAdminEmails: [],
       tenantAdminNames: [],
       adminEmail: String(resolvedAdminUser.email || '').trim().toLowerCase() || null,
       tenants: [],
+    };
+  }
+
+  const hasAdminLeaderRole = Array.isArray(resolvedAdminUser.roles) && resolvedAdminUser.roles.some(
+    (role) => String(role?.code || '').toLowerCase() === 'admin-leader'
+  );
+
+  if (hasAdminLeaderRole) {
+    const ownershipFilter = buildAdminLeaderOwnershipFilter({
+      adminUserId: resolvedAdminUser.id,
+      adminEmail: resolvedAdminUser.email,
+    });
+    const leaders = ownershipFilter
+      ? await strapi.entityService.findMany(APP_ADMIN_LEADER_UID, {
+          filters: ownershipFilter,
+          fields: ['id', 'admin_user_id', 'admin_email', 'name'],
+          limit: 10,
+        })
+      : [];
+    const adminLeaderIds = leaders.map((entry) => parsePositiveInt(entry.id)).filter(Boolean);
+    const tenantAdmins = adminLeaderIds.length
+      ? await strapi.entityService.findMany(APP_TENANT_ADMIN_UID, {
+          filters: {
+            admin_leader: {
+              id: {
+                $in: adminLeaderIds,
+              },
+            },
+          },
+          populate: {
+            tenant: {
+              fields: ['id', 'name', 'slug'],
+            },
+          },
+          fields: ['id', 'admin_user_id', 'admin_email', 'tenant_name'],
+          limit: 1000,
+        })
+      : [];
+    const tenants = tenantAdmins.map((entry) => entry.tenant).filter(Boolean);
+
+    return {
+      isAdmin: true,
+      isSuperAdmin: false,
+      isAdminLeader: true,
+      isTenantAdmin: false,
+      adminLeaderIds,
+      tenantIds: [...new Set(tenants.map((tenant) => tenant.id))],
+      tenantAdminIds: tenantAdmins.map((entry) => parsePositiveInt(entry.id)).filter(Boolean),
+      tenantAdminEmails: [...new Set(tenantAdmins.map((entry) => String(entry.admin_email || '').trim().toLowerCase()).filter(Boolean))],
+      tenantAdminNames: [...new Set(tenantAdmins.map((entry) => String(entry.tenant_name || '').trim()).filter(Boolean))],
+      adminEmail: String(resolvedAdminUser.email || '').trim().toLowerCase() || null,
+      tenants,
     };
   }
 
@@ -303,6 +382,9 @@ const getAdminTenantContext = async (strapi, adminUser) => {
   return {
     isAdmin: true,
     isSuperAdmin: false,
+    isAdminLeader: false,
+    isTenantAdmin: tenantAdminIds.length > 0,
+    adminLeaderIds: [],
     tenantIds: tenants.map((tenant) => tenant.id),
     tenantAdminIds,
     tenantAdminEmails,
@@ -441,6 +523,7 @@ const assertTenantScopeForContact = async (strapi, tenantId, contactId) => {
 
 module.exports = {
   ADMIN_USER_UID,
+  APP_ADMIN_LEADER_UID,
   APP_TENANT_ADMIN_UID,
   APP_TENANT_UID,
   APP_USER_UID,
@@ -449,6 +532,7 @@ module.exports = {
   assertTenantScopeForUser,
   buildTenantLocalImagePath,
   buildTenantUserImagePrefix,
+  buildAdminLeaderOwnershipFilter,
   findTenantByApiKey,
   findTenantLaunchByQrToken,
   findTenantLaunchByReferralCode,

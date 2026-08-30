@@ -100,6 +100,12 @@
       ],
       "default": "tenant_admin"
     },
+    "admin_leader": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::admin-leader.admin-leader",
+      "inversedBy": "tenant_admins"
+    },
     "tenant": {
       "type": "relation",
       "relation": "manyToOne",
