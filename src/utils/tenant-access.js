@@ -22,6 +22,15 @@ const isAdminLeaderRole = (role) => {
     .some((value) => normalizeRoleIdentifier(value) === 'adminleader');
 };
 
+const isSuperAdminRole = (role) => {
+  const code = String(role?.code || '')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-');
+
+  return code === 'strapi-super-admin';
+};
+
 const findTenantByApiKey = async (strapi, apiKey) => {
   const key = String(apiKey || '').trim();
   if (!key) {
@@ -284,9 +293,11 @@ const getAdminTenantContext = async (strapi, adminUser) => {
   }
 
   const roleServiceHasSuperAdminRole = strapi.admin?.services?.role?.hasSuperAdminRole;
-  const isSuperAdmin = typeof roleServiceHasSuperAdminRole === 'function'
+  const isSuperAdminFromService = typeof roleServiceHasSuperAdminRole === 'function'
     ? roleServiceHasSuperAdminRole(resolvedAdminUser)
-    : Array.isArray(resolvedAdminUser.roles) && resolvedAdminUser.roles.some((role) => role?.code === 'strapi-super-admin');
+    : false;
+  const isSuperAdminFromRole = Array.isArray(resolvedAdminUser.roles) && resolvedAdminUser.roles.some(isSuperAdminRole);
+  const isSuperAdmin = isSuperAdminFromService === true || isSuperAdminFromRole;
 
   if (isSuperAdmin) {
     return {
@@ -550,6 +561,7 @@ module.exports = {
   getTenantFilter,
   getTenantIdsFilter,
   isAdminLeaderRole,
+  isSuperAdminRole,
   getUserTenantId,
   parsePositiveInt,
 };

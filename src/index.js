@@ -2839,9 +2839,10 @@ module.exports = {
                 : null;
 
               strapi.log.info(
-                `[tenant-admin][capabilities] adminUser=${adminUser.id} isSuperAdmin=${tenantContext.isSuperAdmin} tenantIds=${JSON.stringify(
-                  tenantContext.tenantIds
-                )} tenantAdminRecordId=${tenantAdminRecordId || 'null'}`
+                `[tenant-admin][capabilities] adminUser=${adminUser.id} isSuperAdmin=${tenantContext.isSuperAdmin}` +
+                ` isAdminLeader=${tenantContext.isAdminLeader} isTenantAdmin=${tenantContext.isTenantAdmin}` +
+                ` tenantIds=${JSON.stringify(tenantContext.tenantIds)}` +
+                ` tenantAdminRecordId=${tenantAdminRecordId || 'null'}`
               );
 
               const sharedApp = await findSharedAppConfig(strapi);
