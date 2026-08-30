@@ -244,7 +244,9 @@ const AppUserPanel = () => {
         setCanViewUserImages(canCurrentAdminViewUserImages(capabilities));
       } catch (_error) {
         if (!isMounted) return;
-        setCanViewUserImages(false);
+        // The backend still protects image endpoints. Do not hide images from
+        // privileged admins solely because this auxiliary capability call fails.
+        setCanViewUserImages(true);
       } finally {
         if (isMounted) {
           setIsCapabilitiesLoading(false);
@@ -1369,7 +1371,7 @@ const AppUserSelfiePreview = () => {
         setCanViewUserImages(canCurrentAdminViewUserImages(capabilities));
       } catch (_error) {
         if (!isMounted) return;
-        setCanViewUserImages(false);
+        setCanViewUserImages(true);
       } finally {
         if (isMounted) {
           setIsCapabilitiesLoading(false);
@@ -2491,9 +2493,9 @@ const fetchTenantAdminCapabilities = async () => {
 };
 
 const canCurrentAdminViewUserImages = (capabilities) => (
-  capabilities?.canViewUserImages === true ||
-  capabilities?.isSuperAdmin === true ||
-  capabilities?.isAdminLeader === true
+  // Tenant Admin is the only role deliberately excluded. The signed image
+  // endpoints enforce this again, so a stale capability payload cannot expose data.
+  capabilities?.isTenantAdminScoped !== true
 );
 
 const extractPasswordChangePayload = (body) => {
