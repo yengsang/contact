@@ -901,6 +901,14 @@ const useTenantAdminFormEnhancements = ({ slug }) => {
       }
 
       if (isCreatePage) {
+        // Tenant Admin creation uses the custom multi-tenant action below.
+        // The native Save submits an empty relation payload before that action.
+        document.querySelectorAll('button[type="submit"]').forEach((button) => {
+          if (/^save$/i.test(String(button.textContent || '').trim())) {
+            button.style.display = 'none';
+          }
+        });
+
         const qrTokenContainer = findFieldContainer('qr_token');
         if (qrTokenContainer) {
           qrTokenContainer.style.display = 'none';
@@ -1106,6 +1114,7 @@ const TenantAdminCreateTenantSelector = () => {
         role: modifiedData?.role || 'tenant_admin',
         tenant_name: String(modifiedData?.tenant_name || '').trim() || null,
         tenantIds: selectedTenantIds,
+        adminLeaderId: resolveTenantIdsFromValue(modifiedData?.admin_leader)[0] || null,
       });
       toggleNotification({
         type: 'success',

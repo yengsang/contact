@@ -19,6 +19,7 @@ const {
   getSharedDeepLinkScheme,
 } = require('./utils/app-launch');
 const {
+  APP_ADMIN_LEADER_UID,
   APP_TENANT_ADMIN_UID,
   APP_TENANT_UID,
   APP_USER_UID,
@@ -2981,6 +2982,7 @@ module.exports = {
             const tenantIds = Array.isArray(data.tenantIds)
               ? [...new Set(data.tenantIds.map((entry) => parsePositiveInt(entry)).filter(Boolean))]
               : [];
+            const adminLeaderId = parsePositiveInt(data.adminLeaderId);
 
             if (!tenantIds.length) {
               return ctx.badRequest('Please select at least one tenant.');
@@ -2989,6 +2991,15 @@ module.exports = {
             const adminEmail = String(data.admin_email || '').trim();
             if (!adminEmail) {
               return ctx.badRequest('Admin Email is required.');
+            }
+
+            if (adminLeaderId) {
+              const adminLeader = await strapi.entityService.findOne(APP_ADMIN_LEADER_UID, adminLeaderId, {
+                fields: ['id'],
+              });
+              if (!adminLeader) {
+                return ctx.badRequest('The selected Admin Leader no longer exists.');
+              }
             }
 
             const baseData = {
@@ -3007,6 +3018,13 @@ module.exports = {
                   tenant: {
                     connect: [{ id: tenantId }],
                   },
+                  ...(adminLeaderId
+                    ? {
+                        admin_leader: {
+                          connect: [{ id: adminLeaderId }],
+                        },
+                      }
+                    : {}),
                 },
                 populate: {
                   tenant: {
