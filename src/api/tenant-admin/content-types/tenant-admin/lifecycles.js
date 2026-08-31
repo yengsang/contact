@@ -22,15 +22,19 @@ const resolveTenantRelationId = (value) => {
     return parsePositiveInt(value);
   }
 
-  if (Array.isArray(value?.connect) && value.connect.length > 0) {
-    return parsePositiveInt(value.connect[0]?.id || value.connect[0]);
+  if (Array.isArray(value)) {
+    return value.map(resolveTenantRelationId).find(Boolean) || null;
   }
 
-  if (typeof value?.id === 'number' || typeof value?.id === 'string') {
-    return parsePositiveInt(value.id);
+  if (typeof value !== 'object') {
+    return null;
   }
 
-  return null;
+  // Strapi may use connect, set, data, or a direct relation object depending
+  // on whether the value came from a create form, edit form, or API request.
+  return [value.id, value.connect, value.set, value.data]
+    .map(resolveTenantRelationId)
+    .find(Boolean) || null;
 };
 
 const findAdminUserByEmail = async (email) => {
@@ -239,6 +243,10 @@ const syncAdminSnapshot = async (event) => {
   const tenantId = resolveTenantRelationId(data.tenant) || parsePositiveInt(existingTenantAdmin?.tenant?.id);
   const tenant = await findTenantById(tenantId);
   if (!tenant) {
+    strapi.log.warn(
+      `[tenant-admin][sync] invalid tenant relation record=${existingRecordId || 'new'}` +
+      ` resolvedTenantId=${tenantId || 'null'} value=${JSON.stringify(data.tenant || null)}`
+    );
     throw new ValidationError('Tenant Admin requires a valid tenant.');
   }
 
