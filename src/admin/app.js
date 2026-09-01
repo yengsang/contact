@@ -951,16 +951,10 @@ const TenantAdminCreateTenantSelector = () => {
     const loadTenants = async () => {
       try {
         setIsLoading(true);
-        const response = await get(`/content-manager/collection-types/${TENANT_UID}`, {
-          params: {
-            page: 1,
-            pageSize: 200,
-            sort: 'name:ASC',
-          },
-        });
+        const response = await get('/tenant-admin/available-tenants');
         if (!isMounted) return;
 
-        const results = response?.data?.results || response?.data || [];
+        const results = response?.data?.data || response?.data || [];
         setOptions(
           results.map((tenant) => ({
             id: tenant.id,

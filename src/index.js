@@ -1034,6 +1034,30 @@ const attachTenantAdminPermissionExpansion = (strapi) => {
       }
     }
 
+    if (tenantContext.isAdminLeader) {
+      const hasTenantAdminCreatePermission = expandedPermissions.some(
+        (permission) =>
+          permission.subject === APP_TENANT_ADMIN_UID &&
+          String(permission.action || '').endsWith('.create')
+      );
+      const tenantAdminReadPermission = expandedPermissions.find(
+        (permission) =>
+          permission.subject === APP_TENANT_ADMIN_UID &&
+          String(permission.action || '').endsWith('.read')
+      );
+
+      if (!hasTenantAdminCreatePermission && tenantAdminReadPermission) {
+        expandedPermissions.push({
+          ...tenantAdminReadPermission,
+          action: String(tenantAdminReadPermission.action).replace(/\.read$/, '.create'),
+          properties: {
+            ...(tenantAdminReadPermission.properties || {}),
+            fields: fieldsBySubject[APP_TENANT_ADMIN_UID],
+          },
+        });
+      }
+    }
+
     ctx.body = {
       data: expandedPermissions.map(sanitizePermission),
     };
@@ -2965,6 +2989,35 @@ module.exports = {
           },
         },
         {
+          method: 'GET',
+          path: '/tenant-admin/available-tenants',
+          handler: async (ctx) => {
+            const adminUser = await getAdminRequestUser(ctx, strapi);
+            if (!adminUser?.id) {
+              return ctx.unauthorized('Admin authentication is required.');
+            }
+
+            const tenantContext = await getAdminTenantContext(strapi, adminUser);
+            if (!tenantContext.isSuperAdmin && !tenantContext.isAdminLeader) {
+              return ctx.forbidden('Only Super Admins and Admin Leaders can create Tenant Admin mappings.');
+            }
+
+            const tenants = await strapi.entityService.findMany(APP_TENANT_UID, {
+              filters: tenantContext.isSuperAdmin
+                ? {}
+                : { id: { $in: tenantContext.tenantIds } },
+              fields: ['id', 'name', 'slug'],
+              sort: ['name:asc'],
+              limit: 1000,
+            });
+
+            ctx.body = { data: tenants };
+          },
+          config: {
+            policies: ['admin::isAuthenticatedAdmin'],
+          },
+        },
+        {
           method: 'POST',
           path: '/tenant-admin/bulk-create',
           handler: async (ctx) => {
@@ -2974,23 +3027,38 @@ module.exports = {
             }
 
             const tenantContext = await getAdminTenantContext(strapi, adminUser);
-            if (!tenantContext.isSuperAdmin) {
-              return ctx.forbidden('Only super admins can create tenant admin mappings.');
+            if (!tenantContext.isSuperAdmin && !tenantContext.isAdminLeader) {
+              return ctx.forbidden('Only Super Admins and Admin Leaders can create Tenant Admin mappings.');
             }
 
             const data = getRequestData(ctx) || {};
             const tenantIds = Array.isArray(data.tenantIds)
               ? [...new Set(data.tenantIds.map((entry) => parsePositiveInt(entry)).filter(Boolean))]
               : [];
-            const adminLeaderId = parsePositiveInt(data.adminLeaderId);
+            const requestedAdminLeaderId = parsePositiveInt(data.adminLeaderId);
 
             if (!tenantIds.length) {
               return ctx.badRequest('Please select at least one tenant.');
             }
 
+            if (
+              tenantContext.isAdminLeader &&
+              tenantIds.some((tenantId) => !tenantContext.tenantIds.includes(tenantId))
+            ) {
+              return ctx.forbidden('You can only create Tenant Admins for tenants assigned to you.');
+            }
+
             const adminEmail = String(data.admin_email || '').trim();
             if (!adminEmail) {
               return ctx.badRequest('Admin Email is required.');
+            }
+
+            const adminLeaderId = tenantContext.isAdminLeader
+              ? tenantContext.adminLeaderIds?.[0] || null
+              : requestedAdminLeaderId;
+
+            if (tenantContext.isAdminLeader && !adminLeaderId) {
+              return ctx.forbidden('Your Admin Leader profile is not linked to this account.');
             }
 
             if (adminLeaderId) {
