@@ -327,10 +327,12 @@ const getScopedUserFilter = (tenantContext) => {
   const ownershipFilters = [];
 
   if (tenantAdminIds.length) {
+    // The mapping ID is immutable and prevents a removed Tenant Admin from
+    // retaining access through the same email address on another mapping.
     ownershipFilters.push({ tenant_admin_id: { $in: tenantAdminIds } });
-  }
-
-  if (tenantAdminEmails.length) {
+  } else if (tenantAdminEmails.length) {
+    // Legacy records may predate tenant_admin_id. Use email only when no
+    // mapping IDs are available for the current scoped admin.
     ownershipFilters.push({ tenant_admin_email: { $in: tenantAdminEmails } });
   }
 
@@ -354,9 +356,7 @@ const getScopedContactFilter = (tenantContext) => {
 
   if (tenantAdminIds.length) {
     ownershipFilters.push({ user: { tenant_admin_id: { $in: tenantAdminIds } } });
-  }
-
-  if (tenantAdminEmails.length) {
+  } else if (tenantAdminEmails.length) {
     ownershipFilters.push({ user: { tenant_admin_email: { $in: tenantAdminEmails } } });
   }
 
@@ -2572,7 +2572,7 @@ module.exports = {
 
       const entityId = getContentManagerEntityId(ctx.request.path || '');
       if (ctx.method === 'GET' && !entityId) {
-        withAdminTenantFilter(ctx, tenantContext.tenantIds);
+        withAdminTenantFilter(ctx, getScopedAdminListFilter(tenantContext, slug));
         return next();
       }
 
