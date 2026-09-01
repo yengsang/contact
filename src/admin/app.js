@@ -864,14 +864,14 @@ const useTenantAdminFormEnhancements = ({ slug }) => {
       const adminEmailInput = findFieldInput('admin_email');
       if (adminEmailInput) {
         adminEmailInput.type = 'email';
-        adminEmailInput.placeholder = 'Enter an existing Strapi admin email';
+        adminEmailInput.placeholder = 'Enter a Strapi admin email (new or existing)';
         adminEmailInput.autocomplete = 'email';
       }
       const adminEmailContainer = findFieldContainer('admin_email');
       if (adminEmailContainer && !adminEmailContainer.querySelector('[data-tenant-admin-admin-email-hint="true"]')) {
         const hint = document.createElement('div');
         hint.dataset.tenantAdminAdminEmailHint = 'true';
-        hint.textContent = 'This must already exist as a Strapi admin user.';
+        hint.textContent = 'Use an existing Strapi admin email, or enter a temporary password below to create one.';
         hint.style.marginTop = '6px';
         hint.style.fontSize = '12px';
         hint.style.color = '#666687';
@@ -940,6 +940,8 @@ const TenantAdminCreateTenantSelector = () => {
   const [actionMountNode, setActionMountNode] = useState(null);
   const isCreatePage = slug === TENANT_ADMIN_UID;
   const [selectedTenantIds, setSelectedTenantIds] = useState([]);
+  const [newAccountPassword, setNewAccountPassword] = useState('');
+  const [confirmNewAccountPassword, setConfirmNewAccountPassword] = useState('');
 
   useEffect(() => {
     if (!isCreatePage) {
@@ -1101,6 +1103,14 @@ const TenantAdminCreateTenantSelector = () => {
       return;
     }
 
+    if (newAccountPassword !== confirmNewAccountPassword) {
+      toggleNotification({
+        type: 'warning',
+        message: 'Temporary password and confirmation do not match.',
+      });
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       await post('/tenant-admin/bulk-create', {
@@ -1109,6 +1119,7 @@ const TenantAdminCreateTenantSelector = () => {
         tenant_name: String(modifiedData?.tenant_name || '').trim() || null,
         tenantIds: selectedTenantIds,
         adminLeaderId: resolveTenantIdsFromValue(modifiedData?.admin_leader)[0] || null,
+        newAccountPassword: newAccountPassword || null,
       });
       toggleNotification({
         type: 'success',
@@ -1184,6 +1195,63 @@ const TenantAdminCreateTenantSelector = () => {
         <Typography variant="omega" textColor="neutral500">
           One QR record will be created per selected tenant.
         </Typography>
+
+        <Box>
+          <Typography
+            variant="omega"
+            textColor="neutral700"
+            style={{ display: 'block', marginBottom: '6px' }}
+          >
+            Temporary password for a new admin account
+          </Typography>
+          <input
+            type="password"
+            value={newAccountPassword}
+            onChange={(event) => setNewAccountPassword(event.target.value)}
+            disabled={isSubmitting}
+            autoComplete="new-password"
+            placeholder="Leave blank when the admin email already exists"
+            style={{
+              width: '100%',
+              minHeight: '40px',
+              border: '1px solid #dcdce4',
+              borderRadius: '4px',
+              padding: '0 12px',
+              background: '#ffffff',
+              color: '#32324d',
+            }}
+          />
+        </Box>
+
+        <Box>
+          <Typography
+            variant="omega"
+            textColor="neutral700"
+            style={{ display: 'block', marginBottom: '6px' }}
+          >
+            Confirm temporary password
+          </Typography>
+          <input
+            type="password"
+            value={confirmNewAccountPassword}
+            onChange={(event) => setConfirmNewAccountPassword(event.target.value)}
+            disabled={isSubmitting}
+            autoComplete="new-password"
+            placeholder="Required only when creating a new admin account"
+            style={{
+              width: '100%',
+              minHeight: '40px',
+              border: '1px solid #dcdce4',
+              borderRadius: '4px',
+              padding: '0 12px',
+              background: '#ffffff',
+              color: '#32324d',
+            }}
+          />
+          <Typography variant="omega" textColor="neutral600" style={{ display: 'block', marginTop: '6px' }}>
+            The password must contain uppercase, lowercase, and a number. Ask the new admin to change it after signing in.
+          </Typography>
+        </Box>
 
         <Flex gap={2} alignItems="flex-end">
           <Box style={{ flex: 1 }}>

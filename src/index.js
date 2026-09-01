@@ -3048,9 +3048,62 @@ module.exports = {
               return ctx.forbidden('You can only create Tenant Admins for tenants assigned to you.');
             }
 
-            const adminEmail = String(data.admin_email || '').trim();
+            const adminEmail = String(data.admin_email || '').trim().toLowerCase();
             if (!adminEmail) {
               return ctx.badRequest('Admin Email is required.');
+            }
+
+            let targetAdminUser = await strapi.db.query('admin::user').findOne({
+              where: { email: adminEmail },
+              select: ['id', 'email'],
+            });
+            let createdAdminUserId = null;
+
+            if (!targetAdminUser) {
+              const newAccountPassword = String(data.newAccountPassword || '');
+              const passwordIsValid =
+                newAccountPassword.length >= 8 &&
+                /[a-z]/.test(newAccountPassword) &&
+                /[A-Z]/.test(newAccountPassword) &&
+                /\d/.test(newAccountPassword);
+
+              if (!passwordIsValid) {
+                return ctx.badRequest(
+                  'No Strapi admin account exists for this email. Enter a temporary password with at least 8 characters, uppercase, lowercase, and a number.'
+                );
+              }
+
+              const standardRoles = await strapi.db.query('admin::role').findMany({
+                where: {
+                  code: {
+                    $in: ['strapi-editor', 'strapi-author'],
+                  },
+                },
+                select: ['id'],
+              });
+              if (!standardRoles.length) {
+                return ctx.internalServerError('The standard Strapi admin roles are not configured.');
+              }
+
+              const emailLocalPart = adminEmail.split('@')[0] || 'Tenant';
+              const createdAdminUser = await strapi.admin.services.user.create({
+                firstname: emailLocalPart,
+                lastname: 'Admin',
+                email: adminEmail,
+                password: newAccountPassword,
+                roles: standardRoles.map((role) => role.id),
+                isActive: true,
+                registrationToken: null,
+              });
+
+              targetAdminUser = {
+                id: createdAdminUser.id,
+                email: createdAdminUser.email,
+              };
+              createdAdminUserId = createdAdminUser.id;
+              strapi.log.info(
+                `[tenant-admin][account-create] adminUser=${createdAdminUser.id} email=${adminEmail} createdBy=${adminUser.id}`
+              );
             }
 
             const adminLeaderId = tenantContext.isAdminLeader
@@ -3071,7 +3124,8 @@ module.exports = {
             }
 
             const baseData = {
-              admin_email: adminEmail,
+              admin_user_id: targetAdminUser.id,
+              admin_email: targetAdminUser.email,
               role: data.role || 'tenant_admin',
               tenant_name: String(data.tenant_name || '').trim() || null,
               qr_token: null,
@@ -3079,28 +3133,36 @@ module.exports = {
             };
 
             const createdRecords = [];
-            for (const tenantId of tenantIds) {
-              const created = await strapi.entityService.create(APP_TENANT_ADMIN_UID, {
-                data: {
-                  ...baseData,
-                  tenant: {
-                    connect: [{ id: tenantId }],
+            try {
+              for (const tenantId of tenantIds) {
+                const created = await strapi.entityService.create(APP_TENANT_ADMIN_UID, {
+                  data: {
+                    ...baseData,
+                    tenant: {
+                      connect: [{ id: tenantId }],
+                    },
+                    ...(adminLeaderId
+                      ? {
+                          admin_leader: {
+                            connect: [{ id: adminLeaderId }],
+                          },
+                        }
+                      : {}),
                   },
-                  ...(adminLeaderId
-                    ? {
-                        admin_leader: {
-                          connect: [{ id: adminLeaderId }],
-                        },
-                      }
-                    : {}),
-                },
-                populate: {
-                  tenant: {
-                    fields: ['id', 'name', 'slug'],
+                  populate: {
+                    tenant: {
+                      fields: ['id', 'name', 'slug'],
+                    },
                   },
-                },
-              });
-              createdRecords.push(created);
+                });
+                createdRecords.push(created);
+              }
+            } catch (error) {
+              // Do not leave an unusable account behind when no mapping was created.
+              if (createdAdminUserId && createdRecords.length === 0) {
+                await strapi.db.query('admin::user').delete({ where: { id: createdAdminUserId } });
+              }
+              throw error;
             }
 
             ctx.body = {
